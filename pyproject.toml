@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bikesmmm"
+version = "0.1.0"
+description = "🚲 BikeShop Marketing Mix Model Director"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "starlette",
+    "uvicorn",
+    "streamlit",
+    "pandas",
+    "numpy",
+    "scipy",
+    "plotly",
+    "requests",
+    "arviz",
+    "xarray",
+    "jinja2",
+    "pyyaml",
+    "google-meridian",
+    "pysimmmulator"
+]
+
+[project.scripts]
+bikesmmm-api = "api.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "ui*", "wrapper*"]
