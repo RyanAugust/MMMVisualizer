@@ -289,13 +289,21 @@ with tabs[1]:
                             
                             current_weekly_spend = spend_decisions[channel['name']] * 7
                             max_x = max(gamma * 2, current_weekly_spend * 1.5)
-                            spend_range = np.linspace(0, max_x, 100)
                             
-                            response_range = (spend_range**alpha) / (spend_range**alpha + gamma**alpha)
+                            # Split ranges: 0 to current, and current to max
+                            spend_hist = np.linspace(0, current_weekly_spend, 50)
+                            spend_proj = np.linspace(current_weekly_spend, max_x, 50)
+                            
+                            resp_hist = (spend_hist**alpha) / (spend_hist**alpha + gamma**alpha)
+                            resp_proj = (spend_proj**alpha) / (spend_proj**alpha + gamma**alpha)
                             current_response = (current_weekly_spend**alpha) / (current_weekly_spend**alpha + gamma**alpha)
                             
                             fig_roi = go.Figure()
-                            fig_roi.add_trace(go.Scatter(x=spend_range, y=response_range, name="Saturation Curve", line=dict(color=G_BLUE)))
+                            # Solid Line (Current/Historical)
+                            fig_roi.add_trace(go.Scatter(x=spend_hist, y=resp_hist, name="Actual", line=dict(color=G_BLUE)))
+                            # Dashed Line (Projected)
+                            fig_roi.add_trace(go.Scatter(x=spend_proj, y=resp_proj, name="Projected", line=dict(color=G_BLUE, dash='dash')))
+                            # Current Marker
                             fig_roi.add_trace(go.Scatter(x=[current_weekly_spend], y=[current_response], mode='markers', marker=dict(color=G_RED, size=12)))
                             fig_roi.update_layout(title=f"{channel['name']} Saturation", xaxis_title="Weekly Spend ($)", yaxis_title="Relative Response", height=300, showlegend=False)
                             st.plotly_chart(fig_roi, width="stretch", key=f"roi_curve_{i}_{channel['name']}")
@@ -310,14 +318,35 @@ with tabs[1]:
                         rev_per_conv = config["basic"]['revenue_per_conv']
                         current_weekly_spend = spend_decisions[channel['name']] * 7
                         max_x = max(gamma * 2, current_weekly_spend * 1.5)
-                        spend_range = np.linspace(0, max_x, 100)
-                        sat_impact_range = (spend_range**alpha) / (spend_range**alpha + gamma**alpha)
+                        
+                        # Split ranges
+                        spend_hist = np.linspace(0, current_weekly_spend, 50)
+                        spend_proj = np.linspace(current_weekly_spend, max_x, 50)
+                        
                         max_weekly_rev = 10000 * 10 * cvr * rev_per_conv # Proxy max
-                        rev_range = max_weekly_rev * sat_impact_range
+                        
+                        rev_hist = max_weekly_rev * ((spend_hist**alpha) / (spend_hist**alpha + gamma**alpha))
+                        rev_proj = max_weekly_rev * ((spend_proj**alpha) / (spend_proj**alpha + gamma**alpha))
                         current_rev = max_weekly_rev * ((current_weekly_spend**alpha) / (current_weekly_spend**alpha + gamma**alpha))
+                        
                         color = GOOGLE_PALETTE[i % len(GOOGLE_PALETTE)]
-                        fig_combined.add_trace(go.Scatter(x=spend_range, y=rev_range, name=channel['name'], line=dict(color=color)))
-                        fig_combined.add_trace(go.Scatter(x=[current_weekly_spend], y=[current_rev], mode='markers', showlegend=False, marker=dict(color=color, size=12, symbol='diamond')))
+                        
+                        # Solid line (Actual)
+                        fig_combined.add_trace(go.Scatter(x=spend_hist, y=rev_hist, 
+                                                       name=channel['name'], 
+                                                       legendgroup=channel['name'],
+                                                       line=dict(color=color), showlegend=True))
+                        # Dashed line (Projected)
+                        fig_combined.add_trace(go.Scatter(x=spend_proj, y=rev_proj, 
+                                                       name=f"{channel['name']} (Proj)", 
+                                                       legendgroup=channel['name'],
+                                                       line=dict(color=color, dash='dash'), showlegend=False))
+                        # The Marker
+                        fig_combined.add_trace(go.Scatter(x=[current_weekly_spend], y=[current_rev], 
+                                                       mode='markers', 
+                                                       legendgroup=channel['name'],
+                                                       showlegend=False,
+                                                       marker=dict(color=color, size=12, symbol='diamond')))
 
                     fig_combined.update_layout(xaxis_title="Weekly Spend ($)", yaxis_title="Predicted Weekly Revenue ($)", height=500, hovermode="x unified")
                     st.plotly_chart(fig_combined, width="stretch", key="combined_response_chart")
