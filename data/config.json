@@ -55,7 +55,7 @@
             "adstock": {
                 "type": "geometric",
                 "params": {
-                    "lambda_": 0.7
+                    "lambda_": 0.8
                 }
             },
             "saturation": {

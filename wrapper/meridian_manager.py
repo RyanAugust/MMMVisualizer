@@ -58,11 +58,12 @@ class MeridianManager:
         cfg = self.config
         channels = cfg["channels"]
         
-        c_impressions = [c["name"] for c in channels if c["type"] == "Impressions"]
+        # Treatment for R&F channels in PySiMMMulator: 
+        # We'll treat them as Impressions for the spend generation.
+        c_impressions = [c["name"] for c in channels if c["type"] in ["Impressions", "Reach & Frequency"]]
         c_clicks = [c["name"] for c in channels if c["type"] == "Clicks"]
         all_channel_names = c_clicks + c_impressions
         
-        # 1. BasicParameters
         bp = BasicParameters(
             years=cfg["basic"]["years"],
             channels_impressions=c_impressions,
@@ -73,7 +74,6 @@ class MeridianManager:
             revenue_per_conv=cfg["basic"]["revenue_per_conv"]
         )
 
-        # 2. BaselineParameters
         bl_cfg = cfg["baseline"]
         blp = BaselineParameters(
             basic_params=bp,
@@ -85,7 +85,6 @@ class MeridianManager:
             error_std=bl_cfg["error_std"]
         )
 
-        # 3. AdSpendParameters
         total_avg_spend = sum([c.get("avg_spend", 5000.0) for c in channels])
         proportions = {}
         if len(all_channel_names) > 1:
@@ -100,25 +99,21 @@ class MeridianManager:
             max_min_proportion_on_each_channel=proportions
         )
 
-        # 4. MediaParameters
         mp = MediaParameters(
-            true_cpm={c["name"]: c["true_cost"] for c in channels if c["type"] == "Impressions"},
+            true_cpm={c["name"]: c["true_cost"] for c in channels if c["type"] in ["Impressions", "Reach & Frequency"]},
             true_cpc={c["name"]: c["true_cost"] for c in channels if c["type"] == "Clicks"},
             noisy_cpm_cpc={c["name"]: c.get("cost_noise", {"loc": 0.0, "scale": 0.05}) for c in channels}
         )
 
-        # 5. CVRParameters
         cp = CVRParameters(
             noisy_cvr={c["name"]: c.get("cvr_noise", {"loc": 0.0, "scale": 0.05}) for c in channels}
         )
 
-        # 6. AdstockParameters
         adp = AdstockParameters(
             adstock={c["name"]: c.get("adstock", {"type": "geometric", "params": {"lambda_": 0.5}}) for c in channels},
             saturation={c["name"]: c.get("saturation", {"type": "hill", "params": {"alpha": 1.0, "gamma": 5000}}) for c in channels}
         )
 
-        # 7. OutputParameters
         op = OutputParameters(aggregation_level="daily")
 
         return bp, blp, asp, mp, cp, adp, op
@@ -139,6 +134,26 @@ class MeridianManager:
         df = sim.calculate_conversions(mmm_df=df)
         df = sim.consolidate_dataframe(mmm_df=df, baseline_sales_df=df_baseline)
         
+        # Manual R&F generation for R&F channels
+        for c in self.config["channels"]:
+            if c["type"] == "Reach & Frequency":
+                name = c["name"]
+                spend = df[f"{name}_spend"]
+                # Reach model: logarithmic saturation of population
+                # Proxy population = 1,000,000
+                pop = 1000000
+                rf_cfg = c.get("rf_params", {"max_reach": 0.8, "reach_slope": 1.0})
+                max_r = rf_cfg["max_reach"]
+                slope_r = rf_cfg["reach_slope"]
+                
+                # reach = pop * max_r * (1 - exp(-slope * spend / (pop * cost)))
+                # we'll simplify:
+                df[f"{name}_reach"] = pop * max_r * (1 - np.exp(-slope_r * spend / 100000))
+                # frequency = spend / (cost * reach)
+                # impressions = reach * frequency
+                # so frequency = impressions / reach
+                df[f"{name}_frequency"] = df[f"{name}_impressions"] / df[f"{name}_reach"].replace(0, 1)
+
         revenue_per_conv = self.config["basic"]["revenue_per_conv"]
         df["total_conversions"] = df["total_revenue"] / revenue_per_conv
         
@@ -157,14 +172,34 @@ class MeridianManager:
         from meridian import constants
 
         channels = self.config["channels"]
-        media_channels = [c["name"] for c in channels]
-        media_cols = [f"{c['name']}_impressions" if c["type"] == "Impressions" else f"{c['name']}_clicks" for c in channels]
-        spend_cols = [f"{c['name']}_spend" for c in channels]
+        
+        # Standard Media Channels
+        media_channels = [c["name"] for c in channels if c["type"] != "Reach & Frequency"]
+        media_cols = [f"{c['name']}_impressions" if c["type"] == "Impressions" else f"{c['name']}_clicks" for c in channels if c["type"] != "Reach & Frequency"]
+        media_spend_cols = [f"{c['name']}_spend" for c in channels if c["type"] != "Reach & Frequency"]
+
+        # R&F Channels
+        rf_channels = [c["name"] for c in channels if c["type"] == "Reach & Frequency"]
+        reach_cols = [f"{c['name']}_reach" for c in channels if c["type"] == "Reach & Frequency"]
+        freq_cols = [f"{c['name']}_frequency" for c in channels if c["type"] == "Reach & Frequency"]
+        rf_spend_cols = [f"{c['name']}_spend" for c in channels if c["type"] == "Reach & Frequency"]
 
         builder = DataFrameInputDataBuilder(kpi_type=constants.NON_REVENUE)
         builder.with_kpi(df, kpi_col="total_conversions")
-        builder.with_media(df, media_cols=media_cols, media_spend_cols=spend_cols, media_channels=media_channels)
-        df["population"] = 1.0
+        
+        if media_channels:
+            builder.with_media(df, media_cols=media_cols, media_spend_cols=media_spend_cols, media_channels=media_channels)
+        
+        if rf_channels:
+            builder.with_reach(
+                df, 
+                reach_cols=reach_cols, 
+                frequency_cols=freq_cols, 
+                rf_spend_cols=rf_spend_cols, 
+                rf_channels=rf_channels
+            )
+
+        df["population"] = 1000000.0 # Match pop used in generate_data
         builder.with_population(df, population_col="population")
         
         input_data = builder.build()
@@ -172,7 +207,7 @@ class MeridianManager:
         mmm = Meridian(input_data=input_data, model_spec=model_spec)
         mmm.sample_posterior(n_chains=1, n_adapt=50, n_burnin=50, n_keep=100)
         save_mmm(mmm, self.model_path)
-        return {"status": "success", "message": "Actual Meridian model trained successfully."}
+        return {"status": "success", "message": "Actual Meridian model trained successfully (with R&F support)."}
 
     def predict(self, spend_decisions: Dict[str, float]) -> Dict[str, Any]:
         """Predicts results using parameters from the trained Meridian model."""
@@ -183,11 +218,15 @@ class MeridianManager:
         try:
             mmm = load_mmm(self.model_path)
             post = mmm.inference_data.posterior
-            channel_names = list(mmm.inference_data.posterior.coords["media_channel"].values)
             
-            slopes = post.slope_m.mean(dim=["chain", "draw"]).to_series()
-            ecs = post.ec_m.mean(dim=["chain", "draw"]).to_series()
+            # Media Channels
+            has_media = "media_channel" in post.coords
+            media_names = list(post.coords["media_channel"].values) if has_media else []
             
+            # RF Channels
+            has_rf = "rf_channel" in post.coords
+            rf_names = list(post.coords["rf_channel"].values) if has_rf else []
+
             from meridian.analysis.analyzer import Analyzer
             analyzer = Analyzer(mmm)
             rois = analyzer.roi().mean(dim=["chain", "draw"]).to_series()
@@ -201,51 +240,47 @@ class MeridianManager:
                 name = channel["name"]
                 daily_spend = spend_decisions.get(name, 0.0)
                 weekly_spend = daily_spend * 7
-                
-                if name in channel_names:
-                    alpha = slopes[name] 
-                    gamma = ecs[name]   
+                s_hist = channel.get("avg_spend", 5000.0)
+
+                if name in media_names:
+                    alpha = post.slope_m.mean(dim=["chain", "draw"]).to_series()[name]
+                    gamma = post.ec_m.mean(dim=["chain", "draw"]).to_series()[name]
                     roi_hist = rois[name]
-                    s_hist = channel.get("avg_spend", 5000.0)
                     
-                    # Revenue = Beta * Saturation(x)
                     sat_hist = (s_hist**alpha) / (s_hist**alpha + gamma**alpha) if s_hist > 0 else 0.5
                     sat_curr = (weekly_spend**alpha) / (weekly_spend**alpha + gamma**alpha) if weekly_spend > 0 else 0
+                    beta = (roi_hist * s_hist) / sat_hist if sat_hist > 0 else 0
+                    predicted_weekly_rev = beta * sat_curr
                     
-                    if sat_hist > 0:
-                        beta = (roi_hist * s_hist) / sat_hist
-                        predicted_weekly_rev = beta * sat_curr
-                    else:
-                        predicted_weekly_rev = 0
-                        
-                    predicted_daily_rev = predicted_weekly_rev / 7
-                    total_predicted_revenue += predicted_daily_rev
-                    channel_results.append({"channel": name, "spend": daily_spend, "predicted_revenue": predicted_daily_rev})
+                elif name in rf_names:
+                    # R&F Impact: Beta * Reach * Hill(Freq)
+                    # For prediction we'll assume a constant frequency or similar to historical
+                    # Or we could model the spend -> reach shift.
+                    # Simplified: treat it like a saturation curve on spend for now in predict
+                    # but use the learned R&F parameters if we can.
+                    alpha = post.slope_rf.mean(dim=["chain", "draw"]).to_series()[name]
+                    gamma = post.ec_rf.mean(dim=["chain", "draw"]).to_series()[name]
+                    roi_hist = rois[name]
+                    
+                    sat_hist = (s_hist**alpha) / (s_hist**alpha + gamma**alpha) if s_hist > 0 else 0.5
+                    sat_curr = (weekly_spend**alpha) / (weekly_spend**alpha + gamma**alpha) if weekly_spend > 0 else 0
+                    beta = (roi_hist * s_hist) / sat_hist if sat_hist > 0 else 0
+                    predicted_weekly_rev = beta * sat_curr
                 else:
-                    channel_results.append({"channel": name, "spend": daily_spend, "predicted_revenue": 0.0})
+                    predicted_weekly_rev = 0
                 
-            return {"total_predicted_revenue": float(total_predicted_revenue), "channel_breakdown": channel_results}
-        except Exception as e:
-            config = self.get_config()
-            revenue_per_conv = config["basic"]["revenue_per_conv"]
-            total_predicted_revenue = config["baseline"]["base_p"] * revenue_per_conv
-            channel_results = []
-            for channel in config["channels"]:
-                name = channel["name"]
-                daily_spend = spend_decisions.get(name, 0.0)
-                weekly_spend = daily_spend * 7
-                cvr = channel["true_cvr"]
-                sat_cfg = channel.get("saturation", {"params": {"alpha": 1.0, "gamma": 5000}})
-                alpha, gamma = sat_cfg["params"]["alpha"], sat_cfg["params"]["gamma"]
-                max_rev = (gamma * 2) * 10 * cvr * revenue_per_conv 
-                predicted_weekly_rev = max_rev * ((weekly_spend**alpha) / (weekly_spend**alpha + gamma**alpha))
                 predicted_daily_rev = predicted_weekly_rev / 7
                 total_predicted_revenue += predicted_daily_rev
                 channel_results.append({"channel": name, "spend": daily_spend, "predicted_revenue": predicted_daily_rev})
-            return {"total_predicted_revenue": float(total_predicted_revenue), "channel_breakdown": channel_results, "message": f"Fallback: {str(e)}"}
+                
+            return {"total_predicted_revenue": float(total_predicted_revenue), "channel_breakdown": channel_results}
+        except Exception as e:
+            # Simple fallback
+            print(f"Prediction error: {e}")
+            return {"total_predicted_revenue": 0.0, "channel_breakdown": [], "error": str(e)}
 
     def optimize_budget(self, total_weekly_budget: float, fixed_allocations: Dict[str, float] = None) -> Dict[str, Any]:
-        """Finds the optimal weekly allocation to maximize total revenue."""
+        # Same optimization logic, now unified for both media and rf by treating them as saturation curves
         from scipy.optimize import minimize
         config = self.get_config()
         channels = config.get("channels", [])
@@ -261,15 +296,25 @@ class MeridianManager:
                 from meridian.analysis.analyzer import Analyzer
                 analyzer = Analyzer(mmm)
                 rois = analyzer.roi().mean(dim=["chain", "draw"]).to_series()
-                slopes = post.slope_m.mean(dim=["chain", "draw"]).to_series()
-                ecs = post.ec_m.mean(dim=["chain", "draw"]).to_series()
+                
+                # Combine media and rf parameters
+                slopes = {}
+                ecs = {}
+                if "media_channel" in post.coords:
+                    slopes.update(post.slope_m.mean(dim=["chain", "draw"]).to_series().to_dict())
+                    ecs.update(post.ec_m.mean(dim=["chain", "draw"]).to_series().to_dict())
+                if "rf_channel" in post.coords:
+                    slopes.update(post.slope_rf.mean(dim=["chain", "draw"]).to_series().to_dict())
+                    ecs.update(post.ec_rf.mean(dim=["chain", "draw"]).to_series().to_dict())
+
                 for c in channels:
-                    if c["name"] in rois:
+                    name = c["name"]
+                    if name in rois:
                         s_hist = c.get("avg_spend", 5000.0)
-                        alpha, gamma = slopes[c["name"]], ecs[c["name"]]
+                        alpha, gamma = slopes[name], ecs[name]
                         sat_hist = (s_hist**alpha) / (s_hist**alpha + gamma**alpha) if s_hist > 0 else 0.5
-                        beta = (rois[c["name"]] * s_hist) / sat_hist if sat_hist > 0 else 0
-                        params_to_use.append({"name": c["name"], "alpha": alpha, "gamma": gamma, "beta": beta})
+                        beta = (rois[name] * s_hist) / sat_hist if sat_hist > 0 else 0
+                        params_to_use.append({"name": name, "alpha": alpha, "gamma": gamma, "beta": beta})
                     else: model_exists = False
             except: model_exists = False
 

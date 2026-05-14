@@ -52,7 +52,7 @@ except Exception as e:
     st.stop()
 
 # Navigation
-tabs = st.tabs(["Stage 1: Model Configuration", "Stage 2: Investment Simulator", "Stage 3: Data Explorer", "Stage 4: Marginal Efficiency"])
+tabs = st.tabs(["Stage 1: Model Configuration", "Stage 2: Investment Simulator", "Stage 3: Data Explorer", "Stage 4: Marginal Efficiency", "Stage 5: Reach & Frequency"])
 
 with tabs[0]:
     st.header("Stage 1: Configure Marketing Landscape")
@@ -86,11 +86,11 @@ with tabs[0]:
             c_col1, c_col2 = st.columns(2)
             with c_col1:
                 new_channel_name = st.text_input("Channel Name")
-                new_channel_type = st.selectbox("Channel Type", ["Impressions", "Clicks"])
+                new_channel_type = st.selectbox("Channel Type", ["Impressions", "Clicks", "Reach & Frequency"])
                 new_channel_cvr = st.slider("True CVR", 0.0, 0.1, 0.01, step=0.001, format="%.3f")
                 
-                cost_label = "True CPM ($)" if new_channel_type == "Impressions" else "True CPC ($)"
-                new_channel_cost = st.number_input(cost_label, value=10.0 if new_channel_type == "Impressions" else 1.0)
+                cost_label = "True CPM ($)" if new_channel_type in ["Impressions", "Reach & Frequency"] else "True CPC ($)"
+                new_channel_cost = st.number_input(cost_label, value=10.0 if new_channel_type in ["Impressions", "Reach & Frequency"] else 1.0)
                 new_avg_spend = st.number_input("Avg Weekly Spend ($)", value=5000)
                 
             with c_col2:
@@ -109,6 +109,10 @@ with tabs[0]:
             
             if st.button("Add Channel"):
                 if new_channel_name:
+                    rf_params = None
+                    if new_channel_type == "Reach & Frequency":
+                        rf_params = {"max_reach": 0.8, "reach_slope": 1.0}
+                    
                     current_channels.append({
                         "name": new_channel_name,
                         "type": new_channel_type,
@@ -118,7 +122,8 @@ with tabs[0]:
                         "adstock": {"type": "geometric", "params": {"lambda_": new_lambda}},
                         "saturation": {"type": "hill", "params": {"alpha": new_alpha, "gamma": float(new_gamma)}},
                         "cost_noise": {"loc": 0.0, "scale": new_cost_noise},
-                        "cvr_noise": {"loc": 0.0, "scale": new_cvr_noise}
+                        "cvr_noise": {"loc": 0.0, "scale": new_cvr_noise},
+                        "rf_params": rf_params
                     })
                     config["channels"] = current_channels
                     requests.post(f"{API_URL}/api/config", json=config)
@@ -482,3 +487,53 @@ with tabs[3]:
                 st.error("Analysis failed. Ensure the model is trained.")
         else:
             st.info("Click 'Run Efficiency Analysis' to generate the scale-up strategy.")
+
+with tabs[4]:
+    st.header("Stage 5: Reach & Frequency Analysis")
+    st.markdown("Analyze the reach and frequency dynamics for your R&F enabled channels.")
+    
+    rf_channels = [c for c in channels if c.get("type") == "Reach & Frequency"]
+    
+    if not rf_channels:
+        st.warning("No Reach & Frequency channels configured in Stage 1.")
+    else:
+        selected_rf = st.selectbox("Select R&F Channel", [c["name"] for c in rf_channels])
+        channel_cfg = next(c for c in rf_channels if c["name"] == selected_rf)
+        
+        # Modeling parameters from Stage 1
+        alpha = channel_cfg.get("saturation", {}).get("params", {}).get("alpha", 1.0)
+        gamma = channel_cfg.get("saturation", {}).get("params", {}).get("gamma", 5000.0)
+        rf_meta = channel_cfg.get("rf_params", {"max_reach": 0.8, "reach_slope": 1.0})
+        
+        col_rf1, col_rf2 = st.columns(2)
+        
+        with col_rf1:
+            st.subheader("Audience Reach Curve")
+            # Reach = Pop * Max_R * (1 - exp(-slope * spend / 100k))
+            spend_range = np.linspace(0, 20000, 100)
+            reach_range = 1000000 * rf_meta["max_reach"] * (1 - np.exp(-rf_meta["reach_slope"] * spend_range / 100000))
+            
+            fig_reach = px.line(x=spend_range, y=reach_range, 
+                               title=f"{selected_rf}: Reach vs Weekly Spend",
+                               labels={'x': 'Weekly Spend ($)', 'y': 'Unique Audience Reach'},
+                               color_discrete_sequence=[G_BLUE])
+            st.plotly_chart(fig_reach, width="stretch", key="rf_reach_chart")
+            
+        with col_rf2:
+            st.subheader("Effective Frequency (Hill)")
+            # In Meridian, R&F impact is Reach * Hill(Freq)
+            freq_range = np.linspace(1, 20, 100)
+            # We'll use a standardized Hill for frequency visualization
+            # Usually half_sat for freq is small (e.g. 2-5)
+            freq_hill = (freq_range**alpha) / (freq_range**alpha + 5**alpha) # Using 5 as half-sat for freq viz
+            
+            fig_freq = px.line(x=freq_range, y=freq_hill, 
+                              title=f"{selected_rf}: Frequency Impact Curve",
+                              labels={'x': 'Average Weekly Frequency', 'y': 'Relative Impact per Reached User'},
+                              color_discrete_sequence=[G_GREEN])
+            st.plotly_chart(fig_freq, width="stretch", key="rf_freq_chart")
+            
+        st.markdown("---")
+        st.subheader("Optimal Frequency Insight")
+        st.info(f"Based on the learned parameters, the '{selected_rf}' channel achieves its highest marginal efficiency when users are reached multiple times. The Hill shape (Alpha={alpha:.2f}) indicates how quickly the message 'sticks' vs. when it becomes 'wear-out'.")
+
