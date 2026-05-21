@@ -327,8 +327,12 @@ class MeridianManager:
                     # However, if we assume the model learned a gamma relative to the scaled media,
                     # and we use the same ratio, it should be okay-ish for the UI.
                     
-                    sat_hist = (s_hist**alpha) / (s_hist**alpha + gamma**alpha) if s_hist > 0 else 0.5
-                    sat_curr = (weekly_spend**alpha) / (weekly_spend**alpha + gamma**alpha) if weekly_spend > 0 else 0
+                    # Normalize spend relative to historical average so it matches Meridian's scaled gamma
+                    x_hist = 1.0 
+                    x_curr = weekly_spend / s_hist if s_hist > 0 else 0
+                    
+                    sat_hist = (x_hist**alpha) / (x_hist**alpha + gamma**alpha)
+                    sat_curr = (x_curr**alpha) / (x_curr**alpha + gamma**alpha)
                     beta = (roi_hist * s_hist) / sat_hist if sat_hist > 0 else 0
                     predicted_weekly_rev = beta * sat_curr
                     
@@ -337,8 +341,11 @@ class MeridianManager:
                     gamma = gammas_rf.get(name, 1.0)
                     roi_hist = rois_rf.get(name, 0.0)
                     
-                    sat_hist = (s_hist**alpha) / (s_hist**alpha + gamma**alpha) if s_hist > 0 else 0.5
-                    sat_curr = (weekly_spend**alpha) / (weekly_spend**alpha + gamma**alpha) if weekly_spend > 0 else 0
+                    x_hist = 1.0 
+                    x_curr = weekly_spend / s_hist if s_hist > 0 else 0
+                    
+                    sat_hist = (x_hist**alpha) / (x_hist**alpha + gamma**alpha)
+                    sat_curr = (x_curr**alpha) / (x_curr**alpha + gamma**alpha)
                     beta = (roi_hist * s_hist) / sat_hist if sat_hist > 0 else 0
                     predicted_weekly_rev = beta * sat_curr
                 else:
@@ -409,18 +416,29 @@ class MeridianManager:
                     if name in rois:
                         s_hist = c.get("avg_spend", 5000.0)
                         alpha, gamma = slopes[name], ecs[name]
-                        sat_hist = (s_hist**alpha) / (s_hist**alpha + gamma**alpha) if s_hist > 0 else 0.5
+                        
+                        x_hist = 1.0
+                        sat_hist = (x_hist**alpha) / (x_hist**alpha + gamma**alpha)
                         beta = (rois[name] * s_hist) / sat_hist if sat_hist > 0 else 0
-                        params_to_use.append({"name": name, "alpha": alpha, "gamma": gamma, "beta": beta})
+                        params_to_use.append({"name": name, "alpha": alpha, "gamma": gamma, "beta": beta, "s_hist": s_hist})
                     else: model_exists = False
             except: model_exists = False
 
         if not model_exists:
             for c in channels:
-                sat_cfg = c.get("saturation", {"params": {"alpha": 1.0, "gamma": 5000}})
-                alpha, gamma = sat_cfg["params"]["alpha"], sat_cfg["params"]["gamma"]
-                beta = (gamma * 2) * 10 * c["true_cvr"] * config["basic"]["revenue_per_conv"]
-                params_to_use.append({"name": c["name"], "alpha": alpha, "gamma": gamma, "beta": beta})
+                s_hist = c.get("avg_spend", 5000.0)
+                sat_cfg = c.get("saturation", {"params": {"alpha": 1.0, "gamma": s_hist}})
+                alpha = sat_cfg["params"]["alpha"]
+                gamma_raw = sat_cfg["params"]["gamma"]
+                gamma = gamma_raw / s_hist if s_hist > 0 else 1.0
+                
+                cost_metric = c["true_cost"] / 1000 if c["type"] in ["Impressions", "Reach & Frequency"] else c["true_cost"]
+                roi_fallback = (c["true_cvr"] * config["basic"]["revenue_per_conv"]) / cost_metric if cost_metric > 0 else 0
+                
+                x_hist = 1.0
+                sat_hist = (x_hist**alpha) / (x_hist**alpha + gamma**alpha)
+                beta = (roi_fallback * s_hist) / sat_hist if sat_hist > 0 else 0
+                params_to_use.append({"name": c["name"], "alpha": alpha, "gamma": gamma, "beta": beta, "s_hist": s_hist})
 
         fixed_allocations = fixed_allocations or {}
         free_params = [p for p in params_to_use if p["name"] not in fixed_allocations]
@@ -431,11 +449,13 @@ class MeridianManager:
             total_rev = 0
             for i, spend in enumerate(free_spends):
                 p = free_params[i]
-                sat = (spend**p["alpha"]) / (spend**p["alpha"] + p["gamma"]**p["alpha"]) if spend > 0 else 0
+                x_curr = spend / p["s_hist"] if p["s_hist"] > 0 else 0
+                sat = (x_curr**p["alpha"]) / (x_curr**p["alpha"] + p["gamma"]**p["alpha"])
                 total_rev += p["beta"] * sat
             for name, spend in fixed_allocations.items():
                 p = next(p for p in params_to_use if p["name"] == name)
-                sat = (spend**p["alpha"]) / (spend**p["alpha"] + p["gamma"]**p["alpha"]) if spend > 0 else 0
+                x_curr = spend / p["s_hist"] if p["s_hist"] > 0 else 0
+                sat = (x_curr**p["alpha"]) / (x_curr**p["alpha"] + p["gamma"]**p["alpha"])
                 total_rev += p["beta"] * sat
             return -total_rev
 
