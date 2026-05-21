@@ -334,7 +334,7 @@ class MeridianManager:
                     sat_hist = (x_hist**alpha) / (x_hist**alpha + gamma**alpha)
                     sat_curr = (x_curr**alpha) / (x_curr**alpha + gamma**alpha)
                     beta = (roi_hist * s_hist) / sat_hist if sat_hist > 0 else 0
-                    predicted_weekly_rev = beta * sat_curr
+                    predicted_weekly_rev = beta * sat_curr * revenue_per_conv
                     
                 elif name in rf_names:
                     alpha = alphas_rf.get(name, 1.0)
@@ -347,7 +347,7 @@ class MeridianManager:
                     sat_hist = (x_hist**alpha) / (x_hist**alpha + gamma**alpha)
                     sat_curr = (x_curr**alpha) / (x_curr**alpha + gamma**alpha)
                     beta = (roi_hist * s_hist) / sat_hist if sat_hist > 0 else 0
-                    predicted_weekly_rev = beta * sat_curr
+                    predicted_weekly_rev = beta * sat_curr * revenue_per_conv
                 else:
                     predicted_weekly_rev = 0
                 
@@ -419,7 +419,7 @@ class MeridianManager:
                         
                         x_hist = 1.0
                         sat_hist = (x_hist**alpha) / (x_hist**alpha + gamma**alpha)
-                        beta = (rois[name] * s_hist) / sat_hist if sat_hist > 0 else 0
+                        beta = ((rois[name] * s_hist) / sat_hist) * config["basic"]["revenue_per_conv"] if sat_hist > 0 else 0
                         params_to_use.append({"name": name, "alpha": alpha, "gamma": gamma, "beta": beta, "s_hist": s_hist})
                     else: model_exists = False
             except: model_exists = False
