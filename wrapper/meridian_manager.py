@@ -11,7 +11,8 @@ from pysimmmulator.param_handlers import (
     MediaParameters, 
     CVRParameters, 
     AdstockParameters, 
-    OutputParameters
+    OutputParameters,
+    GeoParameters
 )
 import datetime
 import pickle
