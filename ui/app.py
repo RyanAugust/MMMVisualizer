@@ -514,15 +514,23 @@ with tabs[4]:
         # Modeling parameters from Stage 1
         alpha = channel_cfg.get("saturation", {}).get("params", {}).get("alpha", 1.0)
         gamma = channel_cfg.get("saturation", {}).get("params", {}).get("gamma", 5000.0)
-        rf_meta = channel_cfg.get("rf_params", {"max_reach": 0.8, "reach_slope": 1.0})
+        rf_meta = channel_cfg.get("rf_params", {})
         
         col_rf1, col_rf2 = st.columns(2)
         
         with col_rf1:
             st.subheader("Audience Reach Curve")
-            # Reach = Pop * Max_R * (1 - exp(-slope * spend / 100k))
             spend_range = np.linspace(0, 20000, 100)
-            reach_range = 1000000 * rf_meta["max_reach"] * (1 - np.exp(-rf_meta["reach_slope"] * spend_range / 100000))
+            
+            if "frequency" in rf_meta:
+                cpm = channel_cfg.get("true_cost", 10.0)
+                impressions = (spend_range / cpm) * 1000
+                reach_range = impressions / rf_meta["frequency"]
+                reach_range = np.minimum(reach_range, 1000000)
+            else:
+                target_reach = rf_meta.get("reach", 0.5)
+                max_reach_prop = target_reach if target_reach <= 1.0 else target_reach / 1000000
+                reach_range = 1000000 * max_reach_prop * (1 - np.exp(-1.0 * spend_range / 100000))
             
             fig_reach = px.line(x=spend_range, y=reach_range, 
                                title=f"{selected_rf}: Reach vs Weekly Spend",
