@@ -3,139 +3,23 @@
         "years": 3,
         "start_date": "2022/01/01",
         "frequency_of_campaigns": 7,
-        "revenue_per_conv": 2500.0
+        "revenue_per_conv": 500.0
     },
     "baseline": {
-        "base_p": 5000,
-        "trend_p": 5000,
-        "temp_var": 400,
-        "temp_coef_mean": 0.55,
-        "temp_coef_sd": 0.13,
-        "error_std": 100
-    },
-    "ad_spend": {
-        "campaign_spend_mean": 50000,
-        "campaign_spend_std": 5000
+        "base_p": 1000,
+        "trend_p": 500,
+        "temp_var": 200,
+        "temp_coef_mean": 0.5,
+        "temp_coef_sd": 0.1,
+        "error_std": 50
     },
     "channels": [
         {
-            "name": "Google_Search",
+            "name": "Search",
             "type": "Clicks",
-            "true_cvr": 0.043,
-            "true_cost": 1.23,
-            "avg_spend": 16000.0,
-            "adstock": {
-                "type": "geometric",
-                "params": {
-                    "lambda_": 0.1
-                }
-            },
-            "saturation": {
-                "type": "hill",
-                "params": {
-                    "alpha": 1.7,
-                    "gamma": 25000.0
-                }
-            },
-            "cost_noise": {
-                "loc": 0.0,
-                "scale": 0.05
-            },
-            "cvr_noise": {
-                "loc": 0.0,
-                "scale": 0.05
-            }
-        },
-        {
-            "name": "Google_Video",
-            "type": "Impressions",
-            "true_cvr": 0.022,
-            "true_cost": 4.89,
-            "avg_spend": 4000.0,
-            "adstock": {
-                "type": "geometric",
-                "params": {
-                    "lambda_": 0.8
-                }
-            },
-            "saturation": {
-                "type": "hill",
-                "params": {
-                    "alpha": 1.6,
-                    "gamma": 14000.0
-                }
-            },
-            "cost_noise": {
-                "loc": 0.0,
-                "scale": 0.05
-            },
-            "cvr_noise": {
-                "loc": 0.0,
-                "scale": 0.05
-            }
-        },
-        {
-            "name": "Linear",
-            "type": "Impressions",
-            "true_cvr": 0.007,
-            "true_cost": 2.29,
-            "avg_spend": 1000.0,
-            "adstock": {
-                "type": "geometric",
-                "params": {
-                    "lambda_": 0.2
-                }
-            },
-            "saturation": {
-                "type": "hill",
-                "params": {
-                    "alpha": 2.2,
-                    "gamma": 10000.0
-                }
-            },
-            "cost_noise": {
-                "loc": 0.0,
-                "scale": 0.05
-            },
-            "cvr_noise": {
-                "loc": 0.0,
-                "scale": 0.05
-            }
-        },
-        {
-            "name": "Google_Brand_Video",
-            "type": "Impressions",
-            "true_cvr": 0.014,
-            "true_cost": 5.24,
-            "avg_spend": 5000.0,
-            "adstock": {
-                "type": "geometric",
-                "params": {
-                    "lambda_": 0.85
-                }
-            },
-            "saturation": {
-                "type": "hill",
-                "params": {
-                    "alpha": 0.8,
-                    "gamma": 100000.0
-                }
-            },
-            "cost_noise": {
-                "loc": 0.0,
-                "scale": 0.13
-            },
-            "cvr_noise": {
-                "loc": 0.0,
-                "scale": 0.07
-            }
-        },
-        {
-            "name": "Meta_Brand_Video",
-            "type": "Impressions",
-            "true_cvr": 0.01,
-            "true_cost": 5.24,
-            "avg_spend": 2000.0,
+            "true_cvr": 0.02,
+            "true_cost": 1.5,
+            "avg_spend": 5000,
             "adstock": {
                 "type": "geometric",
                 "params": {
@@ -145,45 +29,49 @@
             "saturation": {
                 "type": "hill",
                 "params": {
-                    "alpha": 0.8,
-                    "gamma": 50000.0
+                    "alpha": 1.2,
+                    "gamma": 4000
                 }
             },
             "cost_noise": {
                 "loc": 0.0,
-                "scale": 0.16
+                "scale": 0.05
             },
             "cvr_noise": {
                 "loc": 0.0,
-                "scale": 0.1
+                "scale": 0.05
             }
         },
         {
-            "name": "Meta_Conversion_Feed",
-            "type": "Clicks",
-            "true_cvr": 0.038,
-            "true_cost": 1.64,
-            "avg_spend": 3000.0,
+            "name": "TV",
+            "type": "Reach & Frequency",
+            "true_cvr": 0.005,
+            "true_cost": 20.0,
+            "avg_spend": 10000,
             "adstock": {
                 "type": "geometric",
                 "params": {
-                    "lambda_": 0.2
+                    "lambda_": 0.8
                 }
             },
             "saturation": {
                 "type": "hill",
                 "params": {
-                    "alpha": 1.1,
-                    "gamma": 10000.0
+                    "alpha": 1.5,
+                    "gamma": 8000
                 }
             },
             "cost_noise": {
                 "loc": 0.0,
-                "scale": 0.16
+                "scale": 0.05
             },
             "cvr_noise": {
                 "loc": 0.0,
-                "scale": 0.1
+                "scale": 0.05
+            },
+            "rf_params": {
+                "max_reach": 0.7,
+                "reach_slope": 1.2
             }
         }
     ]

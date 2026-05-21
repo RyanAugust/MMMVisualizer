@@ -11,6 +11,8 @@ from wrapper.meridian_manager import MeridianManager
 import uvicorn
 import json
 
+from starlette.concurrency import run_in_threadpool
+
 manager = MeridianManager()
 
 async def get_config(request):
@@ -21,9 +23,14 @@ async def update_config(request):
     manager.save_config(config)
     return JSONResponse({"status": "success", "config": manager.get_config()})
 
+async def get_status(request):
+    return JSONResponse({"is_training": manager.is_training})
+
 async def train_model(request):
+    if manager.is_training:
+        return JSONResponse({"status": "error", "message": "Training already in progress"}, status_code=400)
     try:
-        result = manager.train_model()
+        result = await run_in_threadpool(manager.train_model)
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
@@ -58,6 +65,7 @@ async def optimize(request):
 routes = [
     Route("/api/config", get_config, methods=["GET"]),
     Route("/api/config", update_config, methods=["POST"]),
+    Route("/api/status", get_status, methods=["GET"]),
     Route("/api/train", train_model, methods=["POST"]),
     Route("/api/data", get_data, methods=["GET"]),
     Route("/api/predict", predict, methods=["POST"]),
