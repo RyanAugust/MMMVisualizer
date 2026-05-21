@@ -140,37 +140,127 @@ with tabs[0]:
                     requests.post(f"{API_URL}/api/config", json=config)
                     st.rerun()
 
-        # Display and remove channels
+        st.session_state.setdefault("edit_channel_idx", None)
+
+        # Display and edit/remove channels
         if current_channels:
             st.markdown("---")
             for i, channel in enumerate(current_channels):
                 with st.container():
-                    d_col1, d_col2, d_col3 = st.columns([2, 3, 1])
-                    d_col1.write(f"### {channel['name']}")
-                    d_col1.write(f"**Type:** {channel['type']}")
-                    d_col1.write(f"**True CVR:** {channel['true_cvr']:.3f}")
-                    cost_unit = "CPM" if channel['type'] in ["Impressions", "Reach & Frequency"] else "CPC"
-                    d_col1.write(f"**Cost ({cost_unit}):** ${channel['true_cost']:.2f}")
-                    d_col1.write(f"**Avg Weekly Spend:** ${channel.get('avg_spend', 5000):,.0f}")
-                    
-                    with d_col2:
-                        dv_col1, dv_col2 = st.columns(2)
-                        lambda_val = channel.get("adstock", {}).get("params", {}).get("lambda_", 0.5)
-                        alpha = channel.get("saturation", {}).get("params", {}).get("alpha", 1.0)
-                        gamma = channel.get("saturation", {}).get("params", {}).get("gamma", 5000.0)
-                        
-                        fig_a = plot_adstock_curve(lambda_val)
-                        fig_s = plot_saturation_curve(alpha, gamma)
-                        fig_a.update_layout(height=150, title="Adstock")
-                        fig_s.update_layout(height=150, title="Saturation")
-                        dv_col1.plotly_chart(fig_a, width="stretch", key=f"list_adstock_{i}_{channel['name']}")
-                        dv_col2.plotly_chart(fig_s, width="stretch", key=f"list_saturation_{i}_{channel['name']}")
+                    if st.session_state.edit_channel_idx == i:
+                        st.write(f"### Edit Channel: {channel['name']}")
+                        ec_col1, ec_col2 = st.columns(2)
+                        with ec_col1:
+                            edit_name = st.text_input("Channel Name", value=channel['name'], key=f"edit_name_{i}")
+                            is_rf = channel['type'] == "Reach & Frequency"
+                            base_type_idx = 0 if channel['type'] in ["Impressions", "Reach & Frequency"] else 1
+                            edit_base_type = st.selectbox("Base Channel Type", ["Impressions", "Clicks"], index=base_type_idx, key=f"edit_btype_{i}")
+                            edit_cvr = st.slider("True CVR", 0.0, 0.1, float(channel['true_cvr']), step=0.001, format="%.3f", key=f"edit_cvr_{i}")
+                            
+                            cost_label = "True CPM ($)" if edit_base_type == "Impressions" else "True CPC ($)"
+                            edit_cost = st.number_input(cost_label, value=float(channel['true_cost']), key=f"edit_cost_{i}")
+                            edit_spend = st.number_input("Avg Weekly Spend ($)", value=float(channel.get('avg_spend', 5000)), key=f"edit_spend_{i}")
 
-                    if d_col3.button("Remove", key=f"remove_{i}"):
-                        current_channels.pop(i)
-                        config["channels"] = current_channels
-                        requests.post(f"{API_URL}/api/config", json=config)
-                        st.rerun()
+                            rf_params = channel.get("rf_params")
+                            edit_generate_rf = False
+                            edit_rf_params = None
+                            if edit_base_type == "Impressions":
+                                edit_generate_rf = st.checkbox("Generate Reach & Frequency", value=is_rf, key=f"edit_gen_rf_{i}")
+                                if edit_generate_rf:
+                                    # Default to frequency if not set previously
+                                    is_freq_target = True if rf_params and "frequency" in rf_params else False
+                                    is_reach_target = True if rf_params and ("reach" in rf_params or "max_reach" in rf_params) else False
+                                    if not is_freq_target and not is_reach_target:
+                                        is_reach_target = True # Default fallback
+                                    
+                                    target_idx = 0 if is_freq_target else 1
+                                    edit_rf_target_type = st.radio("R&F Target", ["frequency", "reach"], index=target_idx, horizontal=True, key=f"edit_rf_ttype_{i}")
+                                    
+                                    if edit_rf_target_type == "frequency":
+                                        val = rf_params.get("frequency", 3.0) if rf_params else 3.0
+                                        edit_rf_target_value = st.number_input("Target Frequency", value=float(val), min_value=1.0, key=f"edit_rf_tval_f_{i}")
+                                        edit_rf_params = {"frequency": edit_rf_target_value}
+                                    else:
+                                        val = rf_params.get("reach", rf_params.get("max_reach", 0.5)) if rf_params else 0.5
+                                        edit_rf_target_value = st.number_input("Target Reach (Proportion or Count)", value=float(val), min_value=0.01, key=f"edit_rf_tval_r_{i}")
+                                        edit_rf_params = {"reach": edit_rf_target_value}
+                        
+                        with ec_col2:
+                            st.write("**Modeling Parameters**")
+                            lam_val = channel.get("adstock", {}).get("params", {}).get("lambda_", 0.5)
+                            edit_lambda = st.slider("Adstock Lambda (Geometric Decay)", 0.0, 1.0, float(lam_val), step=0.05, key=f"edit_lam_{i}")
+                            
+                            a_val = channel.get("saturation", {}).get("params", {}).get("alpha", 1.0)
+                            edit_alpha = st.slider("Saturation Alpha (Hill Shape)", 0.5, 3.0, float(a_val), step=0.1, key=f"edit_alpha_{i}")
+                            
+                            g_val = channel.get("saturation", {}).get("params", {}).get("gamma", 5000.0)
+                            edit_gamma = st.number_input("Saturation Gamma (Half Sat Point $)", value=float(g_val), key=f"edit_gamma_{i}")
+                            
+                            st.write("**Noise Parameters**")
+                            cst_n_val = channel.get("cost_noise", {}).get("scale", 0.05)
+                            edit_cost_noise = st.slider("Cost Noise (Scale)", 0.0, 0.2, float(cst_n_val), step=0.01, key=f"edit_cst_n_{i}")
+                            
+                            cvr_n_val = channel.get("cvr_noise", {}).get("scale", 0.05)
+                            edit_cvr_noise = st.slider("CVR Noise (Scale)", 0.0, 0.2, float(cvr_n_val), step=0.01, key=f"edit_cvr_n_{i}")
+                            
+                        eb_col1, eb_col2, eb_col3 = st.columns([1, 1, 4])
+                        if eb_col1.button("Save", key=f"save_edit_{i}"):
+                            final_type = "Reach & Frequency" if edit_generate_rf else edit_base_type
+                            current_channels[i] = {
+                                "name": edit_name,
+                                "type": final_type,
+                                "true_cvr": edit_cvr,
+                                "true_cost": float(edit_cost),
+                                "avg_spend": float(edit_spend),
+                                "adstock": {"type": "geometric", "params": {"lambda_": edit_lambda}},
+                                "saturation": {"type": "hill", "params": {"alpha": edit_alpha, "gamma": float(edit_gamma)}},
+                                "cost_noise": {"loc": 0.0, "scale": edit_cost_noise},
+                                "cvr_noise": {"loc": 0.0, "scale": edit_cvr_noise},
+                                "rf_params": edit_rf_params
+                            }
+                            config["channels"] = current_channels
+                            requests.post(f"{API_URL}/api/config", json=config)
+                            st.session_state.edit_channel_idx = None
+                            st.rerun()
+                        if eb_col2.button("Cancel", key=f"cancel_edit_{i}"):
+                            st.session_state.edit_channel_idx = None
+                            st.rerun()
+                            
+                    else:
+                        d_col1, d_col2, d_col3 = st.columns([2, 3, 1])
+                        d_col1.write(f"### {channel['name']}")
+                        d_col1.write(f"**Type:** {channel['type']}")
+                        d_col1.write(f"**True CVR:** {channel['true_cvr']:.3f}")
+                        cost_unit = "CPM" if channel['type'] in ["Impressions", "Reach & Frequency"] else "CPC"
+                        d_col1.write(f"**Cost ({cost_unit}):** ${channel['true_cost']:.2f}")
+                        d_col1.write(f"**Avg Weekly Spend:** ${channel.get('avg_spend', 5000):,.0f}")
+                        
+                        with d_col2:
+                            dv_col1, dv_col2 = st.columns(2)
+                            lambda_val = channel.get("adstock", {}).get("params", {}).get("lambda_", 0.5)
+                            alpha = channel.get("saturation", {}).get("params", {}).get("alpha", 1.0)
+                            gamma = channel.get("saturation", {}).get("params", {}).get("gamma", 5000.0)
+                            
+                            fig_a = plot_adstock_curve(lambda_val)
+                            fig_s = plot_saturation_curve(alpha, gamma)
+                            fig_a.update_layout(height=150, title="Adstock")
+                            fig_s.update_layout(height=150, title="Saturation")
+                            dv_col1.plotly_chart(fig_a, width="stretch", key=f"list_adstock_{i}_{channel['name']}")
+                            dv_col2.plotly_chart(fig_s, width="stretch", key=f"list_saturation_{i}_{channel['name']}")
+
+                        ebtn_col1, eb_col2 = d_col3.columns(2)
+                        if ebtn_col1.button("Edit", key=f"edit_btn_{i}"):
+                            st.session_state.edit_channel_idx = i
+                            st.rerun()
+                        if eb_col2.button("Remove", key=f"remove_btn_{i}"):
+                            current_channels.pop(i)
+                            config["channels"] = current_channels
+                            requests.post(f"{API_URL}/api/config", json=config)
+                            if st.session_state.edit_channel_idx == i:
+                                st.session_state.edit_channel_idx = None
+                            elif st.session_state.edit_channel_idx is not None and st.session_state.edit_channel_idx > i:
+                                st.session_state.edit_channel_idx -= 1
+                            st.rerun()
                 st.markdown("---")
 
     if st.button("Save & Train Model", type="primary"):
