@@ -106,7 +106,13 @@ class MeridianManager:
                 rf_cfg = c.get("rf_params", {"reach": 0.8})
                 if "max_reach" in rf_cfg:
                     # Handle old config format
-                    rf_truth[c["name"]] = {"reach": rf_cfg["max_reach"]}
+                    val = rf_cfg["max_reach"]
+                    if val <= 1.0: val *= 1000000.0
+                    rf_truth[c["name"]] = {"reach": val}
+                elif "reach" in rf_cfg:
+                    val = rf_cfg["reach"]
+                    if val <= 1.0: val *= 1000000.0
+                    rf_truth[c["name"]] = {"reach": val}
                 else:
                     rf_truth[c["name"]] = rf_cfg
 
@@ -181,24 +187,27 @@ class MeridianManager:
             },
             "output_params": {
                 "aggregation_level": op.aggregation_level
-            },
-            "geo_params": {
-                "total_population": gp.total_population,
-                "geo_specs": gp.geo_specs,
-                "universal_scale": gp.universal_scale,
-                "count": gp.count,
-                "dist_spec": gp.dist_spec,
-                "media_cost_spec": gp.media_cost_spec,
-                "perf_spec": gp.perf_spec
             }
         }
         
+        # We purposely omit 'geo_params' from full_config here because we want PySiMMMulator 
+        # to generate a single 'national' geo (which happens by default if geo_params is omitted).
+        # We only use GeoParameters to extract the total_population for R&F calculations.
+
         res = sim.run_with_config(full_config)
         df = res.df
         
-        # Flatten multi-index if present (national geo + date)
-        if isinstance(df.index, pd.MultiIndex):
-            df = df.reset_index()
+        # Reset index to ensure 'date' and/or 'geo_name' become columns
+        df = df.reset_index()
+
+        # Add a tiny amount of noise to reach and frequency to satisfy Meridian's variance requirement
+        # when PySiMMMulator outputs constant arrays
+        for col in df.columns:
+            if col.endswith("_reach") or col.endswith("_frequency"):
+                if df[col].std() == 0:
+                    # If perfectly constant, add 1% noise
+                    noise = np.random.normal(0, df[col].mean() * 0.01 + 0.01, size=len(df))
+                    df[col] = np.maximum(df[col] + noise, 0.0)
 
         revenue_per_conv = self.config["basic"]["revenue_per_conv"]
         df["total_conversions"] = df["total_revenue"] / revenue_per_conv
