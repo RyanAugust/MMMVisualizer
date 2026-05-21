@@ -86,12 +86,25 @@ with tabs[0]:
             c_col1, c_col2 = st.columns(2)
             with c_col1:
                 new_channel_name = st.text_input("Channel Name")
-                new_channel_type = st.selectbox("Channel Type", ["Impressions", "Clicks", "Reach & Frequency"])
+                new_channel_base_type = st.selectbox("Base Channel Type", ["Impressions", "Clicks"])
                 new_channel_cvr = st.slider("True CVR", 0.0, 0.1, 0.01, step=0.001, format="%.3f")
                 
-                cost_label = "True CPM ($)" if new_channel_type in ["Impressions", "Reach & Frequency"] else "True CPC ($)"
-                new_channel_cost = st.number_input(cost_label, value=10.0 if new_channel_type in ["Impressions", "Reach & Frequency"] else 1.0)
+                cost_label = "True CPM ($)" if new_channel_base_type == "Impressions" else "True CPC ($)"
+                new_channel_cost = st.number_input(cost_label, value=10.0 if new_channel_base_type == "Impressions" else 1.0)
                 new_avg_spend = st.number_input("Avg Weekly Spend ($)", value=5000)
+
+                rf_params = None
+                new_generate_rf = False
+                if new_channel_base_type == "Impressions":
+                    new_generate_rf = st.checkbox("Generate Reach & Frequency", value=False)
+                    if new_generate_rf:
+                        rf_target_type = st.radio("R&F Target", ["frequency", "reach"], horizontal=True)
+                        if rf_target_type == "frequency":
+                            rf_target_value = st.number_input("Target Frequency", value=3.0, min_value=1.0)
+                            rf_params = {"frequency": rf_target_value}
+                        else:
+                            rf_target_value = st.number_input("Target Reach (Proportion or Count)", value=0.5, min_value=0.01)
+                            rf_params = {"reach": rf_target_value}
                 
             with c_col2:
                 st.write("**Modeling Parameters**")
@@ -109,13 +122,11 @@ with tabs[0]:
             
             if st.button("Add Channel"):
                 if new_channel_name:
-                    rf_params = None
-                    if new_channel_type == "Reach & Frequency":
-                        rf_params = {"max_reach": 0.8, "reach_slope": 1.0}
+                    final_type = "Reach & Frequency" if new_generate_rf else new_channel_base_type
                     
                     current_channels.append({
                         "name": new_channel_name,
-                        "type": new_channel_type,
+                        "type": final_type,
                         "true_cvr": new_channel_cvr,
                         "true_cost": float(new_channel_cost),
                         "avg_spend": float(new_avg_spend),
@@ -138,7 +149,7 @@ with tabs[0]:
                     d_col1.write(f"### {channel['name']}")
                     d_col1.write(f"**Type:** {channel['type']}")
                     d_col1.write(f"**True CVR:** {channel['true_cvr']:.3f}")
-                    cost_unit = "CPM" if channel['type'] == "Impressions" else "CPC"
+                    cost_unit = "CPM" if channel['type'] in ["Impressions", "Reach & Frequency"] else "CPC"
                     d_col1.write(f"**Cost ({cost_unit}):** ${channel['true_cost']:.2f}")
                     d_col1.write(f"**Avg Weekly Spend:** ${channel.get('avg_spend', 5000):,.0f}")
                     

@@ -102,9 +102,12 @@ class MeridianManager:
         for c in channels:
             if c["type"] == "Reach & Frequency":
                 # PySiMMMulator expects 'reach' or 'frequency' in the config
-                rf_cfg = c.get("rf_params", {"max_reach": 0.8})
-                # If reach_slope was used, we'll just pass max_reach as reach value for now
-                rf_truth[c["name"]] = {"reach": rf_cfg.get("max_reach", 0.8)}
+                rf_cfg = c.get("rf_params", {"reach": 0.8})
+                if "max_reach" in rf_cfg:
+                    # Handle old config format
+                    rf_truth[c["name"]] = {"reach": rf_cfg["max_reach"]}
+                else:
+                    rf_truth[c["name"]] = rf_cfg
 
         mp = MediaParameters(
             true_cpm={c["name"]: c["true_cost"] for c in channels if c["type"] in ["Impressions", "Reach & Frequency"]},
