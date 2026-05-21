@@ -200,12 +200,12 @@ class MeridianManager:
         # Reset index to ensure 'date' and/or 'geo_name' become columns
         df = df.reset_index()
 
-        # Add a tiny amount of noise to reach and frequency to satisfy Meridian's variance requirement
-        # when PySiMMMulator outputs constant arrays
+        # Add a tiny amount of noise to media metrics to satisfy Meridian's variance requirement
+        # when PySiMMMulator outputs constant arrays (e.g. 0 spend or 0 reach)
         for col in df.columns:
-            if col.endswith("_reach") or col.endswith("_frequency"):
+            if any(col.endswith(suffix) for suffix in ["_reach", "_frequency", "_impressions", "_clicks", "_spend"]):
                 if df[col].std() == 0:
-                    # If perfectly constant, add 1% noise
+                    # If perfectly constant, add a tiny bit of noise
                     noise = np.random.normal(0, df[col].mean() * 0.01 + 0.01, size=len(df))
                     df[col] = np.maximum(df[col] + noise, 0.0)
 
